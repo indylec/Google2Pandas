@@ -1,0 +1,12 @@
+#Unwanted files
+*.DS_STORE
+*.ipynb
+*.json
+
+#Testing and credential folders
+testing/
+ga-creds/
+.idea/
+
+#personal notes
+indy-readme.md

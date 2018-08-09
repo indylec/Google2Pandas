@@ -4,13 +4,13 @@ from googleapiclient.discovery import build
 from oauth2client import client, file, tools
 from oauth2client.service_account import ServiceAccountCredentials
 from sys import stdout
-from copy import deepcopy
+# from copy import deepcopy
 
 import pandas as pd
 import numpy as np
 import httplib2, os
 
-from ._query_parser import QueryParser
+from ._query_parser import QueryParser, QueryParserV4
 
 no_callback = client.OOB_CALLBACK_URN
 default_scope = 'https://www.googleapis.com/auth/analytics.readonly'
@@ -21,12 +21,12 @@ default_secrets_v4 = os.path.join(os.path.dirname(__file__), 'client_secrets_v4.
 
 
 class OAuthDataReaderV4(object):
-    '''
+    """
     Abstract class for handling OAuth2 authentication using the Google
     oauth2client library and the V4 Analytics API
-    '''
-    def __init__(self, scope, discovery_uri):
-        '''
+    """
+    def __init__(self, scope):  # , discovery_uri):
+        """
         Parameters:
         -----------
             secrets : string
@@ -36,21 +36,21 @@ class OAuthDataReaderV4(object):
                 Designates the authentication scope(s).
             discovery_uri : tuple or string
                 Designates discovery uri(s)
-        '''
+        """
         self._scope_ = scope
-        self._discovery_ = discovery_uri
+        # self._discovery_ = discovery_uri
         self._api_ = 'v4'
 
     def _init_service(self, secrets):
         creds = ServiceAccountCredentials.from_json_keyfile_name(secrets,
                                                                  scopes=self._scope_)
 
-        http = creds.authorize(httplib2.Http())
+        # http = creds.authorize(httplib2.Http())
 
         return build('analytics',
                      self._api_,
-                     http=http,
-                     discoveryServiceUrl=self._discovery_)
+                     credentials=creds)
+
 
 class OAuthDataReader(object):
     '''
@@ -171,7 +171,7 @@ class GoogleAnalyticsQuery(OAuthDataReader):
                 Return the dict object provided by GA instead of the DataFrame
                 object. Default = False
             all_results : Boolean
-                Obtain the full query results availble from GA (up to sampling limit).
+                Obtain the full query results available from GA (up to sampling limit).
                 This can be VERY time / bandwidth intensive! Default = False
             query : dict.
                 GA query, only with some added flexibility to be a bit sloppy. Adapted from
@@ -345,12 +345,13 @@ class GoogleAnalyticsQuery(OAuthDataReader):
 
             return df, res
 
+
 class GoogleAnalyticsQueryV4(OAuthDataReaderV4):
     def __init__(self,
                  scope=default_scope,
                  discovery=default_discovery,
                  secrets=default_secrets_v4):
-        '''
+        """
         Query the GA API with ease!  Simply obtain the 'client_secrets.json' file
         as usual and move it to the same directory as this file (default) or
         specify the file location when instantiating this class.
@@ -373,12 +374,12 @@ class GoogleAnalyticsQueryV4(OAuthDataReaderV4):
         At the very least, the 'fields' parameter should be included here:
 
             https://developers.google.com/analytics/devguides/reporting/core/v4/parameters
-        '''
-        super(GoogleAnalyticsQueryV4, self).__init__(scope, discovery)
+        """
+        super(GoogleAnalyticsQueryV4, self).__init__(scope) # , discovery, secrets)
         self._service = self._init_service(secrets)
 
-    def execute_query(self, query, as_dict=False, all_results=True):
-        '''
+    def execute_query(self, as_dict=False, all_results=True, dev=True, **query):
+        """
         Execute **query and translate it to a pandas.DataFrame object.
 
         Parameters:
@@ -400,24 +401,43 @@ class GoogleAnalyticsQueryV4(OAuthDataReaderV4):
         -----------
             df : pandas.DataFrame
                 Reformatted response to **query.
-        '''
+        """
+
+        try:
+            formatted_query = QueryParserV4().parse(**query)
+
+            try:
+                if formatted_query['output']:
+                    as_dict = True
+
+            except KeyError as e:
+                pass
+
+            # response = self._service.reports().batchGet(body=qry).execute()
+
+        except TypeError as e:
+            raise ValueError('Error making query: {0}'.format(e))
+
         if all_results:
-            qry = deepcopy(query)
-            out = {'reports' : []}
+            # qry = deepcopy(query)
+            out = {'reports': []}
 
             while True:
-                response = self._service.reports().batchGet(body=qry).execute()
+                response = self._service.reports().batchGet(body=formatted_query).execute()
                 out['reports'] = out['reports'] + response['reports']
 
                 tkn = response.get('reports', [])[0].get('nextPageToken', '')
                 if tkn:
-                    qry['reportRequests'][0].update({'pageToken' : tkn})
+                    formatted_query['reportRequests'][0].update({'pageToken' : tkn})
 
                 else:
                     break
 
         else:
-            out = self._service.reports().batchGet(body=query).execute()
+            out = self._service.reports().batchGet(body=formatted_query).execute()
+
+        if dev:
+            return out, self.resp2frame(out)
 
         if as_dict:
             return out
